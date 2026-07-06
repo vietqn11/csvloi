@@ -1,0 +1,6 @@
+{
+  "name": "CSV Date Formatter & Log Analyzer",
+  "description": "A tool to correct misaligned columns in CSV files, format 14-digit timestamps, and analyze logs with Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
