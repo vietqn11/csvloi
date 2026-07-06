@@ -90,19 +90,45 @@ Hãy xây dựng ít nhất **2 đến 3 giả thuyết kỹ thuật logic** đ�
 
     const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // Unified fallback & retry execution function for Gemini model calls
+    // Robust multi-model failover with multi-pass retry strategy
     let text = "";
-    const modelsToTry = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+    const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
     let lastApiError: any = null;
 
+    // Pass 1: Try each model immediately with no delay between different models.
+    // If a model returns 503/UNAVAILABLE or other transient errors, we immediately move to the next model
+    // as different models run on different server pools/quotas and are highly likely to be available.
     for (const modelName of modelsToTry) {
-      let attempts = 0;
-      const maxAttempts = 3;
-      let baseDelay = 500; // ms
+      try {
+        console.log(`[Gemini API] Pass 1 - Attempting log analysis with model: ${modelName}`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            systemInstruction,
+            temperature: 0.25,
+          },
+        });
 
-      while (attempts < maxAttempts) {
+        if (response && response.text) {
+          text = response.text;
+          console.log(`[Gemini API] Successfully generated analysis report using model: ${modelName} on Pass 1`);
+          break;
+        }
+      } catch (err: any) {
+        lastApiError = err;
+        console.warn(`[Gemini API] Pass 1 - Model ${modelName} returned error: ${err.message || JSON.stringify(err)}`);
+      }
+    }
+
+    // Pass 2: If all models failed in Pass 1, wait 1500ms and try them one more time with a robust retry block
+    if (!text) {
+      console.log(`[Gemini API] Pass 1 failed for all models. Waiting 1500ms before starting Pass 2...`);
+      await delay(1500);
+
+      for (const modelName of modelsToTry) {
         try {
-          console.log(`[Gemini API] Attempting log analysis with model: ${modelName} (Attempt ${attempts + 1}/${maxAttempts})`);
+          console.log(`[Gemini API] Pass 2 - Attempting log analysis with model: ${modelName}`);
           const response = await ai.models.generateContent({
             model: modelName,
             contents: prompt,
@@ -114,30 +140,13 @@ Hãy xây dựng ít nhất **2 đến 3 giả thuyết kỹ thuật logic** đ�
 
           if (response && response.text) {
             text = response.text;
-            console.log(`[Gemini API] Successfully generated analysis report using model: ${modelName} on attempt ${attempts + 1}`);
+            console.log(`[Gemini API] Successfully generated analysis report using model: ${modelName} on Pass 2`);
             break;
           }
         } catch (err: any) {
           lastApiError = err;
-          attempts++;
-          const errMsg = err.message || JSON.stringify(err);
-          console.warn(`[Gemini API] Model ${modelName} returned error: ${errMsg}`);
-
-          const isTransient = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("busy");
-          
-          if (isTransient && attempts < maxAttempts) {
-            const waitTime = baseDelay * Math.pow(2, attempts - 1);
-            console.log(`[Gemini API] Transient error detected (503/UNAVAILABLE/429). Retrying in ${waitTime}ms...`);
-            await delay(waitTime);
-          } else {
-            // Non-transient error or max attempts reached, move to the next model fallback
-            break;
-          }
+          console.warn(`[Gemini API] Pass 2 - Model ${modelName} returned error: ${err.message || JSON.stringify(err)}`);
         }
-      }
-
-      if (text) {
-        break;
       }
     }
 
